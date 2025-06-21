@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "fifo_naive/version"
+require "active_job"
 require "timeout"
 
 module ActiveJob
