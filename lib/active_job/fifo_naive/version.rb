@@ -2,6 +2,6 @@
 
 module ActiveJob
   module FifoNaive
-    VERSION = "0.1.0-alpha"
+    VERSION = "0.1.0"
   end
 end

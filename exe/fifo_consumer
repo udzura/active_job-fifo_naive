@@ -1,3 +1,7 @@
 #!/usr/bin/env ruby
 
 require "active_job/fifo_naive"
+
+fifo_path = ENV["ACTIVE_JOB_FIFO_PATH"] || "/tmp/active_job_fifo_naive.fifo"
+
+ActiveJob::FifoNaive::Consumer.start(fifo_path: fifo_path)
