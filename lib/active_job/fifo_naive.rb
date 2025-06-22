@@ -8,7 +8,7 @@ module ActiveJob
   module QueueAdapters
     class FifoNaiveAdapter < AbstractAdapter
       def initialize(fifo_path: "/tmp/active_job_fifo_naive.fifo")
-        @fifo = File.open("/tmp/mypipe", File::Constants::WRONLY|File::Constants::NONBLOCK)
+        @fifo = File.open(fifo_path, File::Constants::WRONLY|File::Constants::NONBLOCK)
         Timeout.timeout(30) do
           @fifo.write("\n") # Ensure the FIFO is created and ready for writing
           @fifo.flush
