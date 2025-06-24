@@ -3,15 +3,17 @@
 require_relative "fifo_naive/version"
 require "active_job"
 require "timeout"
+require "pp"
 
 module ActiveJob
   module QueueAdapters
     class FifoNaiveAdapter < AbstractAdapter
       def initialize(fifo_path: "/tmp/active_job_fifo_naive.fifo")
-        @fifo = File.open(fifo_path, File::Constants::WRONLY|File::Constants::NONBLOCK)
+        @fifo_path = fifo_path
         Timeout.timeout(30) do
-          @fifo.write("\n") # Ensure the FIFO is created and ready for writing
-          @fifo.flush
+          fifo = fifo_open
+          fifo.write("\n")
+          fifo.close
         end
       rescue Timeout::Error
         raise "Failed to write to FIFO within the timeout period."
@@ -21,8 +23,9 @@ module ActiveJob
 
       def enqueue(job)
         begin
-          @fifo.write(job.serialize.to_json + "\n")
-          @fifo.flush
+          fifo = fifo_open
+          fifo.write(job.serialize.to_json + "\n")
+          fifo.close
         rescue IOError => e
           raise "Failed to enqueue job: #{e.message}"
         end
@@ -30,6 +33,13 @@ module ActiveJob
 
       def enqueue_at(job, timestamp)
         raise NotImplementedError, "enqueue_at is not supported by FifoNaiveAdapter"
+      end
+
+      private
+
+      def fifo_open
+        # HINT: open each time to avoid issues with closed FIFOs
+        File.open(@fifo_path, File::Constants::WRONLY|File::Constants::NONBLOCK)
       end
     end
   end
@@ -46,20 +56,24 @@ module ActiveJob
           raise "The specified path #{fifo_path} is not a FIFO. Please ensure it is a named pipe."
         end
 
-        @fifo = File.open(fifo_path, File::Constants::RDONLY|File::Constants::NONBLOCK)
+        @fifo = File.open(fifo_path, File::Constants::RDONLY)
         @threads = []
+        Rails.logger.info("Opened FIFO at #{fifo_path}")
       end
 
       attr_reader :fifo, :threads
 
       def start
+        Rails.logger.info("Started consumer process. PID:#{Process.pid}, FIFO Path: #{@fifo.path}")
         begin
           loop do
             line = @fifo.gets
-            if line
-              consume_one_job(line)
+            Rails.logger.debug("Got line size=#{line.size}")
+            if line&.chomp&.present?
+              consume_one_job(line.chomp)
             end
             cleanup_threads
+            sleep 0.1
           end
         rescue EOFError
           Rails.logger.info("FIFO closed, consumer exiting.")
@@ -68,8 +82,16 @@ module ActiveJob
         rescue Interrupt
           Rails.logger.info("Consumer interrupted, gracefully shutting down.")
 
-          while line = @fifo.gets
-            consume_one_job(line)
+          rest = ""
+          while got = @fifo.read_nonblock(4096) rescue nil
+            rest << got
+          end
+          if rest.present?
+            rest.lines.each do |line|
+              if line&.chomp&.present?
+                consume_one_job(line.chomp)
+              end
+            end
           end
           @fifo.close unless @fifo.closed?
 
@@ -92,10 +114,12 @@ module ActiveJob
       def consume_one_job(line)
         job_data = JSON.parse(line)
         job = ActiveJob::Base.deserialize(job_data)
-        Railties.logger.info("Consuming job: #{job.inspect}")
+        Rails.logger.info("Consuming job: #{job.pretty_inspect}")
         threads << Thread.new do
           job.perform_now
         end
+      rescue e
+        Rails.logger.error("Something went wrong: #{e.message}")
       end
 
       def cleanup_threads

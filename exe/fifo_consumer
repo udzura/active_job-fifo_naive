@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 
+# Setting up rails application process
 require File.expand_path("config/environment.rb")
+Rails.logger.broadcasts << ActiveSupport::Logger.new($stdout)
 
 require "active_job/fifo_naive"
 
